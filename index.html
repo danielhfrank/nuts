@@ -1,0 +1,624 @@
+<!doctype html>  
+<html lang="en">
+	
+	<head>
+		<meta charset="utf-8">
+		
+		<title>NUTS!</title>
+
+		<meta name="description" content="#golang presentation">
+		<meta name="author" content="Dan Frank">
+
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+		
+		<link href='http://fonts.googleapis.com/css?family=Lato:400,700,400italic,700italic' rel='stylesheet' type='text/css'>
+		
+		<link rel="icon" href="img/palin.jpeg">
+		
+		<link rel="stylesheet" href="css/main.css">
+		<link rel="stylesheet" href="css/theme/simple.css">
+
+		<!-- For syntax highlighting -->
+		<link rel="stylesheet" href="lib/css/solarized_dark.css">
+
+		<script>
+			// If the query includes 'print-pdf' we'll use the PDF print sheet
+			document.write( '<link rel="stylesheet" href="css/print/' + ( window.location.search.match( /print-pdf/gi ) ? 'pdf' : 'paper' ) + '.css" type="text/css" media="print">' );
+		</script>
+
+		<!--[if lt IE 9]>
+		<script src="lib/js/html5shiv.js"></script>
+		<![endif]-->
+	</head>
+	
+	<body>
+		
+		<div class="reveal">
+
+			<!-- Used to fade in a background when a specific slide state is reached -->
+			<div class="state-background"></div>
+			
+			<!-- Any section element inside of this container is displayed as a slide -->
+			<div class="slides">
+				<section>
+					<h1>NUTS!</h1>
+					<h3>#golang lessons learned and design patterns @bitly</h3>
+					<img src="img/palin.jpeg">
+					<p>
+					    Dan Frank * @danielhfrank * github.com/danielhfrank
+				    </p>
+				</section>
+				
+				<section data-markdown>
+					### Not for the uninitiated! I hope you have:
+					* Read a tutorial / written something in Go
+					* Familiarity with channels (buffered and unbuffered)
+					* Familiarity with Go's duck typing system
+				</section>
+				
+				<section>
+				    Not that I'm actually an expert!  
+				    <br/>
+				    <br/>
+				    Please chime in with questions or suggestions,
+				    I'm hoping to make this a learning experience for me as well
+			    </section>
+			    
+			    <section>
+                    <h3>Motivation</h3>
+                    <p>
+				    We've hit many pitfalls. They've led to many better design decisions,
+				    but we haven't recorded them anywhere.
+				    <br/>
+				    <br/>
+				    Sharing x Discussion = Win for everyone
+				    </p>
+			    </section>
+			    
+			    <section>
+			        <h3>Part 1</h3>
+			        <h2>Unbreak My Heart</h2>
+			        <p>Exit logic and concurrency</p>
+		        </section>
+		        
+		        <section>
+		            <pre class="go"><code contenteditable>
+func doStuff(workChan chan *work, exitChan chan struct{}){
+    for {
+        select{
+        case msg := <- workChan:
+            // do some work
+        case <- exitChan:
+            break
+        }
+    }
+    // cleanup
+}
+				    </code></pre>
+				    <p>Seems pretty clear what the author intended, but what will actually happen here?</p>
+				    <p class="fragment">The break will only break out of the select statement!</p>
+				    <p class="fragment">No shortage of options to fix, I prefer replacing with return</p>
+			    </section>
+			    
+			    <section>
+			        <section>
+			        <h3>Fixed... or is it?</h3>
+		            <pre class="go"><code contenteditable>
+func doStuff(workChan chan *work, exitChan chan struct{}){
+    defer func(){ //cleanup
+        }()
+    for {
+        select{
+        case msg := <- workChan:
+            // do some work
+        case <- exitChan:
+            return
+        }
+    }
+}
+				    </code></pre>
+				    <p class="fragment">What happens when both channels have messages?</p>
+				    <p class="fragment">Select picks from one of them arbitrarily!</p>
+				    </section>
+				    <section>
+				    <h3>Too Crazy?</h3>
+		            <pre><code class="go">
+func doStuff(workChan chan *work, exitChan chan struct{}){
+    defer func(){ //cleanup
+        }()
+    for {
+        select{
+        case msg := <- workChan:
+            // do some work
+        default:
+            select{
+            case <- exitChan:
+                return
+            default:
+            }
+        }
+    }
+}
+				    </code></pre>
+				    </section>
+			    </section>
+			    
+			    
+			    <section>
+			        <section>
+			        <h3>A Cleaner Way Out</h3>
+			        <p>
+			            We can communicate the end of messages on a channel using the close statement,
+			            and iterate using the range statement
+		            </p>
+		            <pre><code class="go">
+func doStuff(workChan chan *work){
+    for msg := range workChan {
+        // do some work
+    }
+    // cleanup
+}
+				    </code></pre>
+				    <p>Close the incoming channel elsewhere when you are ready to quit</p>
+				    </section>
+				    
+				    <section>
+				        <h3>One size doesn't fit all!</h3>
+    		            <pre class="go"><code contenteditable>
+func doStuff(workChan chan *work, otherChan *work, exitChan chan struct{}){
+    defer func(){ //cleanup
+        }()
+    for {
+        select{
+        case msg := <- workChan:
+            // do some work
+        case otherMsg := <- otherChan:
+            // do some other kind of work
+        case <- exitChan:
+            return
+        }
+    }
+}
+    				    </code></pre>
+    				    <p>How to correctly handle arbitrary selects when muxing over multiple channels?</p>
+    				</section>
+		        </section>
+		        
+		        <section>
+		            <h2>Case Study: file2http</h2>
+		            <p>
+		                Reads lines from stdin and publishes them to an http endpoint
+		                <br/>
+		                <a href="https://github.com/bitly/file2http">https://github.com/bitly/file2http</a>
+	                </p>
+                </section>
+                
+                <section>
+                    <p>First attempt: ALL THE GOROUTINES</p>
+		            <pre class="go"><code contenteditable>		                
+
+func main(){
+    reader := bufio.NewReader(os.Stdin)
+    for {
+        line, err := reader.ReadString('\n')
+        if err != nil {
+            break
+        }
+       go publish(line)
+    }
+}
+				    </code></pre>
+			    </section>
+			    
+			    <section data-markdown>
+                    ### Freedom just ain't free
+                    * Goroutine creation and context switching is cheap but not free.
+                    * Creating too many goroutines will bog down your application (not to mention the difficulty in synchronizing them all)
+                    * We try to avoid situations where we create an unbounded number of goroutines
+	            </section>
+                
+	            <section>
+	                <p>Better: parellelize requests, but know numPublishers</p>
+		            <pre class="go"><code contenteditable>
+func publish(msgChan chan []byte) {
+    for msg := range msgChan {
+        // publish it (might take a long time!)
+    }
+}		                
+
+func main(){
+    msgChan := make(chan []byte, 5)
+    for i := 0, i < numPublishers, i++ {
+        go publish(msgChan)
+    }
+    for {
+        // read line and handle error
+        msgChan <- line
+    }
+    close(msgChan)
+}
+				    </code></pre>
+				    <p class="fragment">
+				        Program will exit with msgs still in the channel buffer!
+			        </p>
+				</section>
+				
+                <!-- <section>
+                    <h3>Unjustified Platitude</h3>
+                    <blockquote>
+                        Don't buffer a channel unless you have to, and you only have to when
+                        application logic dictates exactly how much capacity the channel needs*
+                    </blockquote>
+                    <blockquote class="fragment">
+                        *and it's probably gonna be 1
+                    </blockquote>
+                </section> -->
+		        
+		        <section>
+		            <p>
+		                Unfortunately, unbuffering doesn't quite solve our problems
+	                </p>
+	                <p class="fragment">
+	                    The goroutine that picks the value off the channel can and will get interrupted by the main goroutine exiting
+                    </p>
+                    <p class="fragment">
+                        Quite simply, worker goroutines need to be able to tell the main goroutine when they are done
+                    </p>
+                </section>
+                
+                <section>
+                    <section>
+                        <p>OK, take two</p>
+    		            <pre class="go"><code contenteditable>
+func publish(msgChan chan []byte, doneChan chan bool) {
+    for msg := range msgChan {
+        // publish it (might take a long time!)
+    }
+    doneChan <- true // signal completion
+}		                
+
+func main(){
+    msgChan := make(chan []byte, 5)
+    doneChan := make(chan bool)
+    for i := 0, i < numPublishers, i++ {
+        go publish(msgChan, doneChan)
+    }
+    for {
+        // read line and handle error
+        msgChan <- line
+    }
+    close(msgChan)
+    // wait for the right number of completion signals
+    for i := 0, i < numPublishers, i++ {
+        <-doneChan
+    }
+}
+    				    </code></pre>
+				    </section>
+                
+                    <section>
+                        <p>My preferred way...</p>
+    		            <pre class="go"><code contenteditable>
+func publish(msgChan chan []byte, doneChan chan bool) {
+    for msg := range msgChan {
+        // publish it (might take a long time!)
+    }
+    doneChan <- true
+}		                
+
+func main(){
+    msgChan := make(chan []byte, 5)
+    doneChan := make(chan bool) 
+    for i := 0, i < numPublishers, i++ {
+        go publish(msgChan, doneChan)
+        // each time we fire off publish, make sure we wait
+        defer func(){<-doneChan}() 
+    }
+    reader := bufio.NewReader(os.Stdin)
+    for {
+        // read line and handle error
+        msgChan <- line
+    }
+    close(msgChan)
+}
+    				    </code></pre>
+    				    
+				    </section>
+                </section>
+                
+                <section>
+                    <p>Streamline with sync.WaitGroup</p>
+		            <pre class="go"><code contenteditable>
+func publish(msgChan chan []byte, waitGroup *sync.WaitGroup) {
+    for msg := range msgChan {
+        // publish it (might take a long time!)
+    }
+    waitGroup.Done()
+}		                
+
+func main(){
+    msgChan := make(chan []byte, 5)
+    waitGroup := &sync.WaitGroup{}
+    waitGroup.Add(numPublishers)
+    for i := 0, i < numPublishers, i++ {
+        go publish(msgChan, waitGroup)
+    }
+    reader := bufio.NewReader(os.Stdin)
+    for {
+        // read line and handle error
+        msgChan <- line
+    }
+    close(msgChan)
+    waitGroup.Wait()
+}
+				    </code></pre>
+			    </section>
+			    
+			    <section>
+			        <h2>&lt;/Part 1&gt;</h2>
+			        <p>Now is a good time to politely run for the exits</p>
+			        <p class="fragment">Or ask questions</p>
+			        <p class="fragment">Or take issue with anything I've said up to this point</p>
+		        </section>
+		        
+		        <section>
+		            <h3>Part 2</h3>
+			        <h2>Unimorphism</h2>
+			        <p>"Object Oriented Programming" in Go</p>
+			        <p class="fragment">...otherwise known as, "use interfaces"</p>
+			        <p class="fragment">or, James Gosling's nightmare</p>
+		        </section>
+		        
+		        <section>
+		            <h3>Polymorphism as I understand it</h3>
+		            <p class="fragment">
+		                The caller of a method doesn't need to know exactly what type of object it is calling,
+		                the "right" method will still get called
+	                </p>
+	                <p class="fragment">
+	                    Within constraints of the language's type system, of course
+                    </p>
+                </section>
+                
+                <section>
+                    <p>Going boldly where many have failed before...</p>
+                    <h2>Case Study: NY Basketball fans</h2>
+                </section>
+
+			    <section>
+			        <p>Base type: Knicks Fan</p>
+			        <img src="img/Spike+Lee+Atlanta+Hawks+v+New+York+Knicks+YWmkpR_Vmitl.jpg">
+		        </section>
+		        
+		        <section>
+		            <p>Subtype: Newly Converted Nets Fan</p>
+		            <img src="img/SPTSNETS0813-slide-WCJJ-jumbo.jpg">
+	            </section>
+	            
+	            <section>
+	                <section>
+	                <p>Let's look at how they behave in a traditional object oriented language</p>
+	                <pre><code class="java" contenteditable>
+public class KnicksFan extends Object {
+    public void cheer(){
+        System.out.println("Go Knicks!");
+    }
+}
+
+public class NewlyConvertedNetsFan extends KnicksFan {
+    @Override
+    public void cheer(){
+        System.out.println("Go Nets!");
+    }    
+}
+
+public class MadisonSquareGarden extends Object {
+    public static void makeSomeNoise(KnicksFan fan){
+        fan.cheer();
+    }
+
+    public static void main(String... args) {
+        NewlyConvertedNetsFan conflictedFan = new NewlyConvertedNetsFan();
+        makeSomeNoise(conflictedFan); // prints "Go Nets!"
+    }
+}
+                    </code></pre>
+                    </section>
+                    
+                    <section>
+                    <p>Works in Python too</p>
+                    <pre><code class="python" contenteditable>
+class KnicksFan(object):
+    def cheer(self):
+        print "Go Knicks!"
+
+class NewlyConvertedNetsFan(KnicksFan):
+    def cheer(self):
+        print "Go Nets!"
+
+if __name__ == '__main__':
+    fan = NewlyConvertedNetsFan()
+    print isinstance(fan, KnicksFan) # True
+    fan.cheer() # Go Nets!
+                    </code></pre>
+                    </section>
+                </section>
+                
+                <section>
+                    <p>Now let's try the same thing in Go!</p>
+                    <p class="fragment">
+                        We've heard that embedding is just like inheritance but better, so we'll use that
+                    </p>
+                </section>
+                
+                <section>
+                    <pre><code contenteditable>
+type KnicksFan struct{}
+
+func (k *KnicksFan) Cheer(){
+    log.Println("Go Knicks")
+}
+
+type NewlyConvertedNetsFan struct{
+    KnicksFan
+}
+
+func (n *NewlyConvertedNetsFan) Cheer(){
+    log.Println("Go Nets")
+}
+
+func MakeSomeNoise(f *KnicksFan){
+    f.Cheer()
+}
+
+func main(){
+    conflictedFan := &NewlyConvertedNetsFan{}
+    MakeSomeNoise(conflictedFan)
+}
+                    </code></pre>
+                    <p class="fragment">Doesn't compile!</p>
+			    </section>
+			        
+                <section>
+                    <h3>Choice advice from a golang author</h3>
+                    <blockquote>
+                        Ken taught me that thinking before debugging is extremely important. If you dive into the bug, you tend to fix the local issue in the code, but if you think about the bug first, how the bug came to be, you often find and correct a higher-level problem in the code that will improve the design and prevent further bugs.
+                    </blockquote>
+                    <p>-Rob Pike</p>
+                    <p class="fragment">Screw that, we just want it to compile!</p>
+                </section>
+
+                <section>
+                    <pre><code contenteditable>
+type KnicksFan struct{}
+
+func (k *KnicksFan) Cheer(){
+    log.Println("Go Knicks")
+}
+
+type NewlyConvertedNetsFan struct{
+    KnicksFan
+}
+
+func (n *NewlyConvertedNetsFan) Cheer(){
+    log.Println("Go Nets")
+}
+
+func MakeSomeNoise(f *KnicksFan){
+    f.Cheer()
+}
+
+func main(){
+    conflictedFan := &NewlyConvertedNetsFan{}
+    MakeSomeNoise(&conflictedFan.KnicksFan) // just changed this line
+}
+                    </code></pre>
+                    <p class="fragment">Compiles, but it prints "Go Knicks"</p>
+			    </section>
+
+                <section>
+                    <h3>WTF</h3>
+                    <p class="fragment">The problem is, we're using the wrong metaphor</p>
+                </section>
+
+                <section>
+                    <ul>
+                        <li>Traditional OO: The NewlyConvertertedNetsFan is a <i>special kind of Knicks fan</i></li>
+                        <li class="fragment"> Golang: The NewlyConvertedNetsFan still <i>has a little Knicks fan inside of it</i></li>
+                        <li class="fragment">When we pass in &conflictedFan.KnicksFan, we are telling that Knicks fan inside to cheer, and it is saying "Go Knicks!"</li>
+                    </ul>
+                </section>
+                
+                <section>
+                    <p>How can we acheive polymorphism-like behavior?</p>
+                    <p class="fragment">Use interfaces</p>
+                    <p class="fragment">Specifically, the interface defines exactly which methods can have polymorphic behavior</p>
+                </section>
+                
+                <section>
+                    <p>Fixed!</p>
+                    <pre><code>
+type Fan interface{
+    Cheer()
+}
+
+type KnicksFan struct{}
+
+func (k *KnicksFan) Cheer(){
+    log.Println("Go Knicks")
+}
+
+type NewlyConvertedNetsFan struct{
+    KnicksFan
+}
+
+func (n *NewlyConvertedNetsFan) Cheer(){
+    log.Println("Go Nets")
+}
+
+func MakeSomeNoise(f Fan){
+    f.Cheer()
+}
+
+func main(){
+    conflictedFan := &NewlyConvertedNetsFan{}
+    MakeSomeNoise(conflictedFan)
+}
+                    </code></pre>
+                    
+                </section>
+				
+				<section>
+					<h1>THANK YOU</h1>
+					<a href="http://danielhfrank.com/nuts">danielhfrank.com/nuts</a>
+                    <p>Made with <a href="https://github.com/hakimel/reveal.js">reveal.js</a></p>
+					<p>
+					    Dan Frank * @danielhfrank * github.com/danielhfrank
+				    </p>
+				</section>
+			</div>
+
+			<!-- The navigational controls UI -->
+			<aside class="controls">
+				<a class="left" href="#">&#x25C4;</a>
+				<a class="right" href="#">&#x25BA;</a>
+				<a class="up" href="#">&#x25B2;</a>
+				<a class="down" href="#">&#x25BC;</a>
+			</aside>
+
+			<!-- Presentation progress bar -->
+			<div class="progress"><span></span></div>
+			
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.min.js"></script>
+
+		<script>
+			
+			// Full list of configuration options available here:
+			// https://github.com/hakimel/reveal.js#configuration
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				
+                // transition: Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/linear(2d)
+                transition: 'linear',
+
+				// Optional libraries used to extend on reveal.js
+				dependencies: [
+					{ src: 'lib/js/highlight.js', async: true, callback: function() { window.hljs.initHighlightingOnLoad(); } },
+					{ src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+					{ src: 'lib/js/showdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'lib/js/data-markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'socket.io/socket.io.js', async: true, condition: function() { return window.location.host === 'localhost:1947'; } },
+					{ src: 'plugin/speakernotes/client.js', async: true, condition: function() { return window.location.host === 'localhost:1947'; } },
+				]
+			});
+			
+		</script>
+
+	</body>
+</html>
