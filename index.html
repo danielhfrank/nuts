@@ -329,7 +329,6 @@ func main(){
         // each time we fire off publish, make sure we wait
         defer func(){<-doneChan}() 
     }
-    reader := bufio.NewReader(os.Stdin)
     for {
         // read line and handle error
         msgChan <- line
@@ -358,7 +357,6 @@ func main(){
     for i := 0, i < numPublishers, i++ {
         go publish(msgChan, waitGroup)
     }
-    reader := bufio.NewReader(os.Stdin)
     for {
         // read line and handle error
         msgChan <- line
@@ -525,7 +523,7 @@ func MakeSomeNoise(f *KnicksFan){
 
 func main(){
     conflictedFan := &NewlyConvertedNetsFan{}
-    MakeSomeNoise(&conflictedFan.KnicksFan) // just changed this line
+    MakeSomeNoise(&conflictedFan.KnicksFan) // <==
 }
                     </code></pre>
                     <p class="fragment">Compiles, but it prints "Go Knicks"</p>
@@ -571,7 +569,7 @@ func (n *NewlyConvertedNetsFan) Cheer(){
     log.Println("Go Nets")
 }
 
-func MakeSomeNoise(f Fan){
+func MakeSomeNoise(f Fan){ // <==
     f.Cheer()
 }
 
@@ -584,12 +582,25 @@ func main(){
                 </section>
 				
 				<section>
+                    <section>
 					<h1>THANK YOU</h1>
 					<p>These slides: <a href="http://bit.ly/go_nuts">bit.ly/go_nuts</a></p>
                     <p>Made with <a href="https://github.com/hakimel/reveal.js">reveal.js</a></p>
 					<p>
 					    Dan Frank * @danielhfrank * github.com/danielhfrank
 				    </p>
+                    </section>
+
+                    <section data-markdown>
+                        ### Bitly Go Open Source
+                        * go-notify
+                        * go-simplejson
+                        * file2http
+                        * mreiferson/go-httpclient
+                        * mreiferson/go-install-as
+                        * mynameisfiber/Go-Redis
+                    </section>
+
 				</section>
 			</div>
 
