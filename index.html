@@ -179,7 +179,7 @@ func doStuff(workChan chan *work){
 				    
 				    <section>
 				        <h3>One size doesn't fit all!</h3>
-    		            <pre class="go"><code contenteditable>
+    		            <pre class="go" style="width: 105%;"><code contenteditable>
 func doStuff(workChan chan *work, otherChan *work, exitChan chan struct{}){
     defer func(){ //cleanup
         }()
@@ -281,7 +281,7 @@ func main(){
                     </p>
                 </section>
                 
-                <section style="margin-top: -60px;">
+                <section style="margin-top: -70px;">
                     <section>
                         <p>OK, take two</p>
     		            <pre class="go"><code contenteditable>
@@ -340,9 +340,9 @@ func main(){
 				    </section>
                 </section>
                 
-                <section style="margin-top: -35px;">
+                <section style="margin-top: -45px;">
                     <p>Streamline with sync.WaitGroup</p>
-		            <pre class="go"><code contenteditable>
+		            <pre class="go" style="width: 100%;"><code contenteditable>
 func publish(msgChan chan []byte, waitGroup *sync.WaitGroup) {
     for msg := range msgChan {
         // publish it (might take a long time!)
@@ -408,10 +408,10 @@ func main(){
 		            <img src="img/SPTSNETS0813-slide-WCJJ-jumbo.jpg">
 	            </section>
 	            
-	            <section style="margin-top: -100px;">
+	            <section style="margin-top: -120px;">
 	                <section>
-	                <p>Let's look at how they behave in a traditional object oriented language</p>
-	                <pre><code class="java" contenteditable>
+	                <p>Let's look at how they behave in a traditional object oriented language (Java)</p>
+	                <pre style="width: 110%;"><code class="java" contenteditable>
 public class KnicksFan extends Object {
     public void cheer(){
         System.out.println("Go Knicks!");
@@ -427,12 +427,12 @@ public class NewlyConvertedNetsFan extends KnicksFan {
 
 public class MadisonSquareGarden extends Object {
     public static void makeSomeNoise(KnicksFan fan){
-        fan.cheer();
+      fan.cheer();
     }
 
     public static void main(String... args) {
-        NewlyConvertedNetsFan conflictedFan = new NewlyConvertedNetsFan();
-        makeSomeNoise(conflictedFan); // prints "Go Nets!"
+      NewlyConvertedNetsFan conflictedFan = new NewlyConvertedNetsFan();
+      makeSomeNoise(conflictedFan); // prints "Go Nets!"
     }
 }
                     </code></pre>
@@ -464,7 +464,7 @@ if __name__ == '__main__':
                     </p>
                 </section>
                 
-                <section style="margin-top: -35px;">
+                <section style="margin-top: -40px;">
                     <pre><code contenteditable>
 type KnicksFan struct{}
 
@@ -501,7 +501,7 @@ func main(){
                     <p class="fragment">Screw that, we just want it to compile!</p>
                 </section>
 
-                <section style="margin-top: -40px;">
+                <section style="margin-top: -50px;">
                     <pre><code contenteditable>
 type KnicksFan struct{}
 
@@ -548,7 +548,7 @@ func main(){
                     <p class="fragment">Specifically, the interface defines exactly which methods can have polymorphic behavior</p>
                 </section>
                 
-                <section style="margin-top: -80px;">
+                <section style="margin-top: -105px;">
                     <p>Fixed!</p>
                     <pre><code>
 type Fan interface{
